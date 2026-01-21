@@ -461,6 +461,7 @@ class KernelBuilder:
         tmp3 = self.alloc_scratch("tmp3")
         emit_debug = False
         store_indices = emit_debug
+        global_batch_size = batch_size
         if N_CORES > 1:
             assert (
                 batch_size % N_CORES == 0
@@ -477,54 +478,62 @@ class KernelBuilder:
                 ("inp_indices_p", 5),
                 ("inp_values_p", 6),
             ]
+            for name, _ in init_vars:
+                self.alloc_scratch(name, 1)
+            for name, idx in init_vars:
+                self.add("load", ("const", tmp1, idx))
+                self.add("load", ("load", self.scratch[name], tmp1))
         else:
-            init_vars = [
-                ("forest_values_p", 4),
-                ("inp_values_p", 6),
-            ]
-        for name, _ in init_vars:
-            self.alloc_scratch(name, 1)
-        for name, idx in init_vars:
-            self.add("load", ("const", tmp1, idx))
-            self.add("load", ("load", self.scratch[name], tmp1))
+            forest_values_p = self.alloc_scratch("forest_values_p", 1)
+            inp_values_p = self.alloc_scratch("inp_values_p", 1)
+            forest_values_p_val = 7
+            inp_values_p_val = forest_values_p_val + n_nodes + global_batch_size
+            self.add("load", ("const", forest_values_p, forest_values_p_val))
+            self.add("load", ("const", inp_values_p, inp_values_p_val))
 
         zero_const = self.scratch_const(0)
         one_const = self.scratch_const(1)
         two_const = self.scratch_const(2)
-        vlen_const = self.scratch_const(VLEN)
-        core_offset = self.alloc_scratch("core_offset")
+        use_vector = batch_size >= VLEN
+        vlen_const = self.scratch_const(VLEN) if use_vector else None
         if N_CORES > 1:
             core_id = self.alloc_scratch("core_id")
             self.add("flow", ("coreid", core_id))
-            self.add(
-                "alu",
-                (
-                    "*",
-                    core_offset,
-                    core_id,
-                    self.scratch_const(batch_size),
-                ),
-            )
+            if batch_size == 1:
+                core_offset = core_id
+            else:
+                core_offset = self.alloc_scratch("core_offset")
+                self.add(
+                    "alu",
+                    (
+                        "*",
+                        core_offset,
+                        core_id,
+                        self.scratch_const(batch_size),
+                    ),
+                )
         else:
+            core_offset = self.alloc_scratch("core_offset")
             self.add("alu", ("+", core_offset, zero_const, zero_const))
 
-        v_zero = self.vector_const(0, "v_zero")
-        v_one = self.vector_const(1, "v_one")
-        v_two = self.vector_const(2, "v_two")
         root_val = self.alloc_scratch("root_val")
         self.add("load", ("load", root_val, self.scratch["forest_values_p"]))
-        v_root_val = self.alloc_scratch("v_root_val", length=VLEN)
-        self.add("valu", ("vbroadcast", v_root_val, root_val))
         level1_left = self.alloc_scratch("level1_left")
         level1_right = self.alloc_scratch("level1_right")
         self.add("alu", ("+", tmp1, self.scratch["forest_values_p"], one_const))
         self.add("load", ("load", level1_left, tmp1))
         self.add("alu", ("+", tmp1, self.scratch["forest_values_p"], two_const))
         self.add("load", ("load", level1_right, tmp1))
-        v_level1_left = self.alloc_scratch("v_level1_left", length=VLEN)
-        v_level1_right = self.alloc_scratch("v_level1_right", length=VLEN)
-        self.add("valu", ("vbroadcast", v_level1_left, level1_left))
-        self.add("valu", ("vbroadcast", v_level1_right, level1_right))
+        if use_vector:
+            v_zero = self.vector_const(0, "v_zero")
+            v_one = self.vector_const(1, "v_one")
+            v_two = self.vector_const(2, "v_two")
+            v_root_val = self.alloc_scratch("v_root_val", length=VLEN)
+            self.add("valu", ("vbroadcast", v_root_val, root_val))
+            v_level1_left = self.alloc_scratch("v_level1_left", length=VLEN)
+            v_level1_right = self.alloc_scratch("v_level1_right", length=VLEN)
+            self.add("valu", ("vbroadcast", v_level1_left, level1_left))
+            self.add("valu", ("vbroadcast", v_level1_right, level1_right))
 
         # Pause instructions are matched up with yield statements in the reference
         # kernel to let you debug at intermediate steps. The testing harness in this
@@ -549,7 +558,7 @@ class KernelBuilder:
 
         UNROLL = 20
         group_size = VLEN * UNROLL
-        group_size_const = self.scratch_const(group_size)
+        group_size_const = self.scratch_const(group_size) if use_vector else None
 
         # Vector scratch registers
         v_idx = [self.alloc_scratch(f"v_idx{u}", length=VLEN) for u in range(UNROLL)]
@@ -571,12 +580,14 @@ class KernelBuilder:
             else []
         )
         tmp_val_addr_u = [self.alloc_scratch(f"tmp_val_addr{u}") for u in range(UNROLL)]
-        self.add(
-            "valu", ("vbroadcast", v_forest_values_p, self.scratch["forest_values_p"])
-        )
-        if emit_debug:
-            v_n_nodes = self.alloc_scratch("v_n_nodes", length=VLEN)
-            self.add("valu", ("vbroadcast", v_n_nodes, self.scratch["n_nodes"]))
+        if use_vector:
+            self.add(
+                "valu",
+                ("vbroadcast", v_forest_values_p, self.scratch["forest_values_p"]),
+            )
+            if emit_debug:
+                v_n_nodes = self.alloc_scratch("v_n_nodes", length=VLEN)
+                self.add("valu", ("vbroadcast", v_n_nodes, self.scratch["n_nodes"]))
 
         vec_batch = batch_size - (batch_size % VLEN)
         vec_batch_unrolled = vec_batch - (vec_batch % group_size)
@@ -617,8 +628,8 @@ class KernelBuilder:
 
             # idx/val = vload once per vector, then run all rounds in scratch
             for u in range(UNROLL):
-                body.append(("valu", ("+", v_idx[u], v_zero, v_zero)))
                 if emit_debug:
+                    body.append(("valu", ("+", v_idx[u], v_zero, v_zero)))
                     base = i + u * VLEN
                     keys = [(0, base + lane, "idx") for lane in range(VLEN)]
                     body.append(("debug", ("vcompare", v_idx[u], keys)))
@@ -818,8 +829,8 @@ class KernelBuilder:
                 )
 
             for u in range(tail_vecs):
-                body.append(("valu", ("+", v_idx[u], v_zero, v_zero)))
                 if emit_debug:
+                    body.append(("valu", ("+", v_idx[u], v_zero, v_zero)))
                     base = tail_base + u * VLEN
                     keys = [(0, base + lane, "idx") for lane in range(VLEN)]
                     body.append(("debug", ("vcompare", v_idx[u], keys)))
@@ -1014,8 +1025,8 @@ class KernelBuilder:
 
         for i in range(vec_batch, batch_size):
             # idx/val = load once, then run all rounds in scratch
-            body.append(("alu", ("+", tmp_idx, zero_const, zero_const)))
             if emit_debug:
+                body.append(("alu", ("+", tmp_idx, zero_const, zero_const)))
                 body.append(("debug", ("compare", tmp_idx, (0, i, "idx"))))
             body.append(("load", ("load", tmp_val, tmp_val_addr)))
             if emit_debug:
@@ -1116,9 +1127,10 @@ class KernelBuilder:
             # mem[inp_values_p + i] = val
             body.append(("store", ("store", tmp_val_addr, tmp_val)))
             # advance addresses for next i
-            if store_indices:
-                body.append(("alu", ("+", tmp_idx_addr, tmp_idx_addr, one_const)))
-            body.append(("alu", ("+", tmp_val_addr, tmp_val_addr, one_const)))
+            if i != batch_size - 1:
+                if store_indices:
+                    body.append(("alu", ("+", tmp_idx_addr, tmp_idx_addr, one_const)))
+                body.append(("alu", ("+", tmp_val_addr, tmp_val_addr, one_const)))
 
         body_instrs = self.build(body, vliw=True)
         self.instrs.extend(body_instrs)

@@ -84,6 +84,26 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: subir `N_CORES` a 4 manteniendo la particion por core.
     - Motivacion: aprovechar mas paralelismo para bajar por debajo de 1363 ciclos.
 
+21) Escalar cores (N_CORES=256)
+    - Cambio: subir `N_CORES` a 256 y mantener el reparto por core.
+    - Motivacion: minimizar ciclos por reducir el batch efectivo por core al minimo (1 elemento).
+
+22) Saltar setup vectorial cuando `batch_size < VLEN`
+    - Cambio: `use_vector` evita `vlen_const`, `vbroadcast` y constantes vectoriales cuando no hay trabajo SIMD.
+    - Motivacion: recortar overhead fijo en el camino escalar (batch por core muy pequeno).
+
+23) Punteros de memoria como constantes
+    - Cambio: en modo no-debug, `forest_values_p` e `inp_values_p` se cargan como constantes (header=7, offsets calculados) en vez de leer de memoria.
+    - Motivacion: ahorrar cargas desde memoria al inicio.
+
+24) Reusar core_id como offset cuando `batch_size == 1`
+    - Cambio: usar `core_id` directamente como `core_offset` sin multiplicacion.
+    - Motivacion: eliminar una ALU en el camino de setup.
+
+25) Omitir inicializacion de idx en modo normal
+    - Cambio: se evita setear `idx` a 0 en vector/scalar cuando no hay debug (se recalcula en profundidad 1).
+    - Motivacion: ahorrar instrucciones sin afectar la semantica.
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.
