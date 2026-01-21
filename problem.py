@@ -56,7 +56,7 @@ SLOT_LIMITS = {
 
 VLEN = 8
 # Older versions of the take-home used multiple cores, but this version only uses 1
-N_CORES = 256
+N_CORES = 1
 SCRATCH_SIZE = 1536
 BASE_ADDR_TID = 100000
 
