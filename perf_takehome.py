@@ -461,6 +461,11 @@ class KernelBuilder:
         tmp3 = self.alloc_scratch("tmp3")
         emit_debug = False
         store_indices = emit_debug
+        if N_CORES > 1:
+            assert (
+                batch_size % N_CORES == 0
+            ), "batch_size must be divisible by N_CORES"
+            batch_size = batch_size // N_CORES
         # Scratch space addresses
         if emit_debug:
             init_vars = [
@@ -487,6 +492,21 @@ class KernelBuilder:
         one_const = self.scratch_const(1)
         two_const = self.scratch_const(2)
         vlen_const = self.scratch_const(VLEN)
+        core_offset = self.alloc_scratch("core_offset")
+        if N_CORES > 1:
+            core_id = self.alloc_scratch("core_id")
+            self.add("flow", ("coreid", core_id))
+            self.add(
+                "alu",
+                (
+                    "*",
+                    core_offset,
+                    core_id,
+                    self.scratch_const(batch_size),
+                ),
+            )
+        else:
+            self.add("alu", ("+", core_offset, zero_const, zero_const))
 
         v_zero = self.vector_const(0, "v_zero")
         v_one = self.vector_const(1, "v_one")
@@ -562,10 +582,16 @@ class KernelBuilder:
         vec_batch_unrolled = vec_batch - (vec_batch % group_size)
         if store_indices:
             body.append(
-                ("alu", ("+", tmp_idx_addr, self.scratch["inp_indices_p"], zero_const))
+                (
+                    "alu",
+                    ("+", tmp_idx_addr, self.scratch["inp_indices_p"], core_offset),
+                )
             )
         body.append(
-            ("alu", ("+", tmp_val_addr, self.scratch["inp_values_p"], zero_const))
+            (
+                "alu",
+                ("+", tmp_val_addr, self.scratch["inp_values_p"], core_offset),
+            )
         )
         for i in range(0, vec_batch_unrolled, group_size):
             # Compute per-block base addresses

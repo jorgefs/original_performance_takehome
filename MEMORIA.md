@@ -76,6 +76,10 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: los `pause` inicial/final se emiten solo en modo debug.
     - Motivacion: ahorrar ciclos en el harness de submission (no usa pause).
 
+19) Particion por core (N_CORES=2)
+    - Cambio: `batch_size` se divide entre cores; se calcula `core_offset` con `coreid` y se ajustan los punteros `inp_values_p`/`inp_indices_p`.
+    - Motivacion: ejecutar en paralelo dos mitades del batch y reducir ciclos casi a la mitad.
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.
