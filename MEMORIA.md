@@ -68,6 +68,10 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: aumentar `UNROLL` a 8 (grupo de 64 elementos), eliminando el tail vector para batch_size=256.
     - Motivacion: menos overhead por grupo y mejor throughput pese a limitar `valu` a 6 slots.
 
+17) Recalcular idx en profundidad 1
+    - Cambio: cuando no hay debug, se omite el update de idx en profundidad 0 y se recalcula en profundidad 1 desde `val & 1`, reutilizando esa paridad para el `vselect`.
+    - Motivacion: ahorrar instrucciones en profundidad 0 y reutilizar la paridad ya disponible en profundidad 1.
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.

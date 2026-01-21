@@ -615,19 +615,35 @@ class KernelBuilder:
                     )
                 elif depth == 1:
                     for u in range(UNROLL):
-                        body.append(("valu", ("&", v_tmp1[u], v_idx[u], v_one)))
-                        body.append(
-                            (
-                                "flow",
+                        if emit_debug:
+                            body.append(("valu", ("&", v_tmp1[u], v_idx[u], v_one)))
+                            body.append(
                                 (
-                                    "vselect",
-                                    v_node_val[u],
-                                    v_tmp1[u],
-                                    v_level1_left,
-                                    v_level1_right,
-                                ),
+                                    "flow",
+                                    (
+                                        "vselect",
+                                        v_node_val[u],
+                                        v_tmp1[u],
+                                        v_level1_left,
+                                        v_level1_right,
+                                    ),
+                                )
                             )
-                        )
+                        else:
+                            body.append(("valu", ("&", v_tmp1[u], v_val[u], v_one)))
+                            body.append(("valu", ("+", v_idx[u], v_tmp1[u], v_one)))
+                            body.append(
+                                (
+                                    "flow",
+                                    (
+                                        "vselect",
+                                        v_node_val[u],
+                                        v_tmp1[u],
+                                        v_level1_right,
+                                        v_level1_left,
+                                    ),
+                                )
+                            )
                         body.append(("valu", ("^", v_val[u], v_val[u], v_node_val[u])))
                     body.extend(
                         self.build_hash_vec_multi(
@@ -689,11 +705,11 @@ class KernelBuilder:
                 else:
                     if depth == 0:
                         # idx = (val & 1) + 1 (since idx is 0 at root)
-                        for u in range(UNROLL):
-                            body.append(("valu", ("&", v_idx[u], v_val[u], v_one)))
-                        for u in range(UNROLL):
-                            body.append(("valu", ("+", v_idx[u], v_idx[u], v_one)))
                         if emit_debug:
+                            for u in range(UNROLL):
+                                body.append(("valu", ("&", v_idx[u], v_val[u], v_one)))
+                            for u in range(UNROLL):
+                                body.append(("valu", ("+", v_idx[u], v_idx[u], v_one)))
                             for u in range(UNROLL):
                                 base = i + u * VLEN
                                 keys = [
@@ -804,19 +820,35 @@ class KernelBuilder:
                     )
                 elif depth == 1:
                     for u in range(tail_vecs):
-                        body.append(("valu", ("&", v_tmp1[u], v_idx[u], v_one)))
-                        body.append(
-                            (
-                                "flow",
+                        if emit_debug:
+                            body.append(("valu", ("&", v_tmp1[u], v_idx[u], v_one)))
+                            body.append(
                                 (
-                                    "vselect",
-                                    v_node_val[u],
-                                    v_tmp1[u],
-                                    v_level1_left,
-                                    v_level1_right,
-                                ),
+                                    "flow",
+                                    (
+                                        "vselect",
+                                        v_node_val[u],
+                                        v_tmp1[u],
+                                        v_level1_left,
+                                        v_level1_right,
+                                    ),
+                                )
                             )
-                        )
+                        else:
+                            body.append(("valu", ("&", v_tmp1[u], v_val[u], v_one)))
+                            body.append(("valu", ("+", v_idx[u], v_tmp1[u], v_one)))
+                            body.append(
+                                (
+                                    "flow",
+                                    (
+                                        "vselect",
+                                        v_node_val[u],
+                                        v_tmp1[u],
+                                        v_level1_right,
+                                        v_level1_left,
+                                    ),
+                                )
+                            )
                         body.append(("valu", ("^", v_val[u], v_val[u], v_node_val[u])))
                     body.extend(
                         self.build_hash_vec_multi(
@@ -883,11 +915,11 @@ class KernelBuilder:
                 else:
                     if depth == 0:
                         # idx = (val & 1) + 1 (since idx is 0 at root)
-                        for u in range(tail_vecs):
-                            body.append(("valu", ("&", v_idx[u], v_val[u], v_one)))
-                        for u in range(tail_vecs):
-                            body.append(("valu", ("+", v_idx[u], v_idx[u], v_one)))
                         if emit_debug:
+                            for u in range(tail_vecs):
+                                body.append(("valu", ("&", v_idx[u], v_val[u], v_one)))
+                            for u in range(tail_vecs):
+                                body.append(("valu", ("+", v_idx[u], v_idx[u], v_one)))
                             for u in range(tail_vecs):
                                 base = tail_base + u * VLEN
                                 keys = [
@@ -970,10 +1002,23 @@ class KernelBuilder:
                         self.build_hash(tmp_val, tmp1, tmp2, round, i, emit_debug)
                     )
                 elif depth == 1:
-                    body.append(("alu", ("&", tmp1, tmp_idx, one_const)))
-                    body.append(
-                        ("flow", ("select", tmp_node_val, tmp1, level1_left, level1_right))
-                    )
+                    if emit_debug:
+                        body.append(("alu", ("&", tmp1, tmp_idx, one_const)))
+                        body.append(
+                            (
+                                "flow",
+                                ("select", tmp_node_val, tmp1, level1_left, level1_right),
+                            )
+                        )
+                    else:
+                        body.append(("alu", ("&", tmp1, tmp_val, one_const)))
+                        body.append(("alu", ("+", tmp_idx, tmp1, one_const)))
+                        body.append(
+                            (
+                                "flow",
+                                ("select", tmp_node_val, tmp1, level1_right, level1_left),
+                            )
+                        )
                     if emit_debug:
                         body.append(
                             ("debug", ("compare", tmp_node_val, (round, i, "node_val")))
@@ -1019,9 +1064,9 @@ class KernelBuilder:
                 else:
                     if depth == 0:
                         # idx = (val & 1) + 1 (since idx is 0 at root)
-                        body.append(("alu", ("&", tmp_idx, tmp_val, one_const)))
-                        body.append(("alu", ("+", tmp_idx, tmp_idx, one_const)))
                         if emit_debug:
+                            body.append(("alu", ("&", tmp_idx, tmp_val, one_const)))
+                            body.append(("alu", ("+", tmp_idx, tmp_idx, one_const)))
                             body.append(
                                 ("debug", ("compare", tmp_idx, (round, i, "next_idx")))
                             )
