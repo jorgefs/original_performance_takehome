@@ -64,6 +64,10 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: en profundidad 1 se selecciona entre los dos nodos (idx 1/2) via `vselect` sobre `idx & 1`, con valores precargados y broadcast.
     - Motivacion: eliminar `load_offset` por lane en ese nivel y reducir ciclos de load.
 
+16) Unroll = 8
+    - Cambio: aumentar `UNROLL` a 8 (grupo de 64 elementos), eliminando el tail vector para batch_size=256.
+    - Motivacion: menos overhead por grupo y mejor throughput pese a limitar `valu` a 6 slots.
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.
