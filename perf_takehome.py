@@ -539,9 +539,9 @@ class KernelBuilder:
                         for u in range(UNROLL):
                             body.append(("valu", ("+", v_tmp3[u], v_tmp1[u], v_one)))
                         for u in range(UNROLL):
-                            body.append(("valu", ("*", v_idx[u], v_idx[u], v_two)))
-                        for u in range(UNROLL):
-                            body.append(("valu", ("+", v_idx[u], v_idx[u], v_tmp3[u])))
+                            body.append(
+                                ("valu", ("multiply_add", v_idx[u], v_idx[u], v_two, v_tmp3[u]))
+                            )
                         if emit_debug:
                             for u in range(UNROLL):
                                 base = i + u * VLEN
@@ -639,8 +639,9 @@ class KernelBuilder:
                         # idx = 2*idx + (1 if val even else 2)
                         body.append(("valu", ("&", v_tmp1[0], v_val[0], v_one)))
                         body.append(("valu", ("+", v_tmp3[0], v_tmp1[0], v_one)))
-                        body.append(("valu", ("*", v_idx[0], v_idx[0], v_two)))
-                        body.append(("valu", ("+", v_idx[0], v_idx[0], v_tmp3[0])))
+                        body.append(
+                            ("valu", ("multiply_add", v_idx[0], v_idx[0], v_two, v_tmp3[0]))
+                        )
                         if emit_debug:
                             keys = [(round, i + lane, "next_idx") for lane in range(VLEN)]
                             body.append(("debug", ("vcompare", v_idx[0], keys)))
