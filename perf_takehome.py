@@ -510,7 +510,8 @@ class KernelBuilder:
         # kernel to let you debug at intermediate steps. The testing harness in this
         # file requires these match up to the reference kernel's yields, but the
         # submission harness ignores them.
-        self.add("flow", ("pause",))
+        if emit_debug:
+            self.add("flow", ("pause",))
         # Any debug engine instruction is ignored by the submission simulator
         self.add("debug", ("comment", "Starting loop"))
 
@@ -1096,7 +1097,8 @@ class KernelBuilder:
         body_instrs = self.build(body, vliw=True)
         self.instrs.extend(body_instrs)
         # Required to match with the yield in reference_kernel2
-        self.instrs.append({"flow": [("pause",)]})
+        if emit_debug:
+            self.instrs.append({"flow": [("pause",)]})
 
 BASELINE = 147734
 

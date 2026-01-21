@@ -72,6 +72,10 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: cuando no hay debug, se omite el update de idx en profundidad 0 y se recalcula en profundidad 1 desde `val & 1`, reutilizando esa paridad para el `vselect`.
     - Motivacion: ahorrar instrucciones en profundidad 0 y reutilizar la paridad ya disponible en profundidad 1.
 
+18) Eliminar pausas en modo normal
+    - Cambio: los `pause` inicial/final se emiten solo en modo debug.
+    - Motivacion: ahorrar ciclos en el harness de submission (no usa pause).
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.
