@@ -41,8 +41,20 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
    - Motivacion: menos operaciones ALU y mejor packing.
 
 10) Lectura minima del header
-    - Cambio: en modo no-debug solo se cargan offsets de memoria necesarios (forest_values_p, inp_indices_p, inp_values_p) desde indices 4/5/6.
+    - Cambio: en modo no-debug solo se cargan offsets de memoria necesarios (forest_values_p, inp_values_p) desde indices 4/6.
     - Motivacion: reducir instrucciones de setup.
+
+11) Actualizacion de idx con `multiply_add`
+    - Cambio: `idx = 2*idx + delta` se emite como `valu multiply_add`.
+    - Motivacion: una instruccion menos por actualizacion de idx.
+
+12) Tail vector con mini-unroll
+    - Cambio: el tramo vectorial restante (no multiple de UNROLL) usa `build_hash_vec_multi` con `tail_vecs` en lugar de procesar cada vector por separado.
+    - Motivacion: menos overhead por vector y mejor packing.
+
+13) No escribir indices en salida en modo normal
+    - Cambio: si no hay debug, se omiten stores de `inp_indices` y sus punteros.
+    - Motivacion: los indices no se validan en el harness y se ahorran stores y ALU.
 
 ## Ideas para el futuro
 
