@@ -64,9 +64,9 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: en profundidad 1 se selecciona entre los dos nodos (idx 1/2) via `vselect` sobre `idx & 1`, con valores precargados y broadcast.
     - Motivacion: eliminar `load_offset` por lane en ese nivel y reducir ciclos de load.
 
-16) Unroll = 8
-    - Cambio: aumentar `UNROLL` a 8 (grupo de 64 elementos), eliminando el tail vector para batch_size=256.
-    - Motivacion: menos overhead por grupo y mejor throughput pese a limitar `valu` a 6 slots.
+16) Unroll = 9
+    - Cambio: aumentar `UNROLL` a 9 (grupo de 72 elementos), con tail de 5 vectores en batch_size=256.
+    - Motivacion: mejor balance entre slots de `valu` y numero de grupos.
 
 17) Recalcular idx en profundidad 1
     - Cambio: cuando no hay debug, se omite el update de idx en profundidad 0 y se recalcula en profundidad 1 desde `val & 1`, reutilizando esa paridad para el `vselect`.

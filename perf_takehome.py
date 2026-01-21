@@ -527,7 +527,7 @@ class KernelBuilder:
         )
         tmp_val_addr = self.alloc_scratch("tmp_val_addr")
 
-        UNROLL = 8
+        UNROLL = 9
         group_size = VLEN * UNROLL
         group_size_const = self.scratch_const(group_size)
 
