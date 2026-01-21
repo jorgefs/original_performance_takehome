@@ -318,6 +318,137 @@ class KernelBuilder:
                     slots.append(("debug", ("vcompare", val_addrs[u], keys)))
         return slots
 
+    def build_hash_vec_multi_stages(
+        self, val_addrs, tmp1_addrs, tmp2_addrs, round, i_base, emit_debug
+    ):
+        stages = []
+        for hi, (op1, val1, op2, op3, val3) in enumerate(HASH_STAGES):
+            stage_slots = []
+            if op1 == "+" and op2 == "+" and op3 == "<<":
+                mult = 1 + (1 << val3)
+                for u in range(len(val_addrs)):
+                    stage_slots.append(
+                        (
+                            "valu",
+                            (
+                                "multiply_add",
+                                val_addrs[u],
+                                val_addrs[u],
+                                self.vector_const(mult),
+                                self.vector_const(val1),
+                            ),
+                        )
+                    )
+            else:
+                for u in range(len(val_addrs)):
+                    stage_slots.append(
+                        (
+                            "valu",
+                            (op1, tmp1_addrs[u], val_addrs[u], self.vector_const(val1)),
+                        )
+                    )
+                    stage_slots.append(
+                        (
+                            "valu",
+                            (op3, tmp2_addrs[u], val_addrs[u], self.vector_const(val3)),
+                        )
+                    )
+                for u in range(len(val_addrs)):
+                    stage_slots.append(
+                        ("valu", (op2, val_addrs[u], tmp1_addrs[u], tmp2_addrs[u]))
+                    )
+            if emit_debug:
+                for u in range(len(val_addrs)):
+                    base = i_base + u * VLEN
+                    keys = [
+                        (round, base + lane, "hash_stage", hi) for lane in range(VLEN)
+                    ]
+                    stage_slots.append(("debug", ("vcompare", val_addrs[u], keys)))
+            stages.append(stage_slots)
+        return stages
+
+    def build_hash_pipeline(
+        self,
+        v_idx,
+        v_val,
+        v_node_addr,
+        v_node_val,
+        v_tmp1,
+        v_tmp2,
+        v_forest_values_p,
+        round,
+        i_base,
+        emit_debug,
+        vec_count,
+        hash_group=3,
+    ):
+        slots = []
+        for u in range(vec_count):
+            slots.append(("valu", ("+", v_node_addr[u], v_idx[u], v_forest_values_p)))
+
+        group_size = min(hash_group, vec_count)
+        num_groups = (vec_count + group_size - 1) // group_size
+        load_progress = [0] * num_groups
+
+        def emit_load_for_group(g, group_start, group_vecs):
+            idx = load_progress[g]
+            u = group_start + idx // VLEN
+            lane = idx % VLEN
+            slots.append(("load", ("load_offset", v_node_val[u], v_node_addr[u], lane)))
+            load_progress[g] = idx + 1
+
+        for g in range(num_groups):
+            group_start = g * group_size
+            group_vecs = min(group_size, vec_count - group_start)
+            total_loads = group_vecs * VLEN
+            while load_progress[g] < total_loads:
+                emit_load_for_group(g, group_start, group_vecs)
+            if emit_debug:
+                for u in range(group_start, group_start + group_vecs):
+                    base = i_base + u * VLEN
+                    keys = [
+                        (round, base + lane, "node_val") for lane in range(VLEN)
+                    ]
+                    slots.append(("debug", ("vcompare", v_node_val[u], keys)))
+
+            for u in range(group_start, group_start + group_vecs):
+                slots.append(("valu", ("^", v_val[u], v_val[u], v_node_val[u])))
+
+            stages = self.build_hash_vec_multi_stages(
+                v_val[group_start : group_start + group_vecs],
+                v_tmp1[group_start : group_start + group_vecs],
+                v_tmp2[group_start : group_start + group_vecs],
+                round,
+                i_base + group_start * VLEN,
+                emit_debug,
+            )
+
+            next_g = g + 1
+            if next_g < num_groups:
+                next_start = next_g * group_size
+                next_vecs = min(group_size, vec_count - next_start)
+                next_total = next_vecs * VLEN
+                remaining = next_total - load_progress[next_g]
+                loads_per_stage = (
+                    (remaining + len(stages) - 1) // len(stages) if remaining > 0 else 0
+                )
+            else:
+                next_start = next_vecs = next_total = loads_per_stage = 0
+
+            for stage_slots in stages:
+                slots.extend(stage_slots)
+                if next_g < num_groups and loads_per_stage:
+                    for _ in range(loads_per_stage):
+                        if load_progress[next_g] >= next_total:
+                            break
+                        emit_load_for_group(next_g, next_start, next_vecs)
+
+            if next_g < num_groups:
+                while load_progress[next_g] < next_total:
+                    emit_load_for_group(next_g, next_start, next_vecs)
+
+        return slots
+
     def build_kernel(
         self, forest_height: int, n_nodes: int, batch_size: int, rounds: int
     ):
@@ -468,30 +599,27 @@ class KernelBuilder:
                     for u in range(UNROLL):
                         body.append(("valu", ("^", v_val[u], v_val[u], v_root_val)))
                 else:
-                    for u in range(UNROLL):
-                        # node_val = gather(forest_values_p + idx)
-                        body.append(
-                            ("valu", ("+", v_node_addr[u], v_idx[u], v_forest_values_p))
+                    body.extend(
+                        self.build_hash_pipeline(
+                            v_idx,
+                            v_val,
+                            v_node_addr,
+                            v_node_val,
+                            v_tmp1,
+                            v_tmp2,
+                            v_forest_values_p,
+                            round,
+                            i,
+                            emit_debug,
+                            UNROLL,
                         )
-                        for lane in range(VLEN):
-                            body.append(
-                                (
-                                    "load",
-                                    ("load_offset", v_node_val[u], v_node_addr[u], lane),
-                                )
-                            )
-                        if emit_debug:
-                            base = i + u * VLEN
-                            keys = [
-                                (round, base + lane, "node_val") for lane in range(VLEN)
-                            ]
-                            body.append(("debug", ("vcompare", v_node_val[u], keys)))
-                    # val = myhash(val ^ node_val)
-                    for u in range(UNROLL):
-                        body.append(("valu", ("^", v_val[u], v_val[u], v_node_val[u])))
-                body.extend(
-                    self.build_hash_vec_multi(v_val, v_tmp1, v_tmp2, round, i, emit_debug)
-                )
+                    )
+                if depth == 0:
+                    body.extend(
+                        self.build_hash_vec_multi(
+                            v_val, v_tmp1, v_tmp2, round, i, emit_debug
+                        )
+                    )
                 if emit_debug:
                     for u in range(UNROLL):
                         base = i + u * VLEN
@@ -634,36 +762,32 @@ class KernelBuilder:
                     for u in range(tail_vecs):
                         body.append(("valu", ("^", v_val[u], v_val[u], v_root_val)))
                 else:
-                    for u in range(tail_vecs):
-                        # node_val = gather(forest_values_p + idx)
-                        body.append(
-                            ("valu", ("+", v_node_addr[u], v_idx[u], v_forest_values_p))
+                    body.extend(
+                        self.build_hash_pipeline(
+                            v_idx,
+                            v_val,
+                            v_node_addr,
+                            v_node_val,
+                            v_tmp1,
+                            v_tmp2,
+                            v_forest_values_p,
+                            round,
+                            tail_base,
+                            emit_debug,
+                            tail_vecs,
                         )
-                        for lane in range(VLEN):
-                            body.append(
-                                (
-                                    "load",
-                                    ("load_offset", v_node_val[u], v_node_addr[u], lane),
-                                )
-                            )
-                        if emit_debug:
-                            base = tail_base + u * VLEN
-                            keys = [
-                                (round, base + lane, "node_val") for lane in range(VLEN)
-                            ]
-                            body.append(("debug", ("vcompare", v_node_val[u], keys)))
-                        # val = myhash(val ^ node_val)
-                        body.append(("valu", ("^", v_val[u], v_val[u], v_node_val[u])))
-                body.extend(
-                    self.build_hash_vec_multi(
-                        v_val[:tail_vecs],
-                        v_tmp1[:tail_vecs],
-                        v_tmp2[:tail_vecs],
-                        round,
-                        tail_base,
-                        emit_debug,
                     )
-                )
+                if depth == 0:
+                    body.extend(
+                        self.build_hash_vec_multi(
+                            v_val[:tail_vecs],
+                            v_tmp1[:tail_vecs],
+                            v_tmp2[:tail_vecs],
+                            round,
+                            tail_base,
+                            emit_debug,
+                        )
+                    )
                 if emit_debug:
                     for u in range(tail_vecs):
                         base = tail_base + u * VLEN

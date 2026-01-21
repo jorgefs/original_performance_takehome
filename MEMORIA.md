@@ -56,6 +56,10 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: si no hay debug, se omiten stores de `inp_indices` y sus punteros.
     - Motivacion: los indices no se validan en el harness y se ahorran stores y ALU.
 
+14) Pipeline de hash por grupos para solapar loads/valu
+    - Cambio: el hash en niveles no-raiz se hace por grupos (3 vectores) e inserta `load_offset` del siguiente grupo entre etapas del hash.
+    - Motivacion: solapar el motor de loads con el hash (valu) y recortar ciclos por ronda.
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.
