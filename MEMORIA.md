@@ -60,6 +60,10 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: el hash en niveles no-raiz se hace por grupos (3 vectores) e inserta `load_offset` del siguiente grupo entre etapas del hash.
     - Motivacion: solapar el motor de loads con el hash (valu) y recortar ciclos por ronda.
 
+15) Nivel 1 con vselect
+    - Cambio: en profundidad 1 se selecciona entre los dos nodos (idx 1/2) via `vselect` sobre `idx & 1`, con valores precargados y broadcast.
+    - Motivacion: eliminar `load_offset` por lane en ese nivel y reducir ciclos de load.
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.

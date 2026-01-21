@@ -495,6 +495,16 @@ class KernelBuilder:
         self.add("load", ("load", root_val, self.scratch["forest_values_p"]))
         v_root_val = self.alloc_scratch("v_root_val", length=VLEN)
         self.add("valu", ("vbroadcast", v_root_val, root_val))
+        level1_left = self.alloc_scratch("level1_left")
+        level1_right = self.alloc_scratch("level1_right")
+        self.add("alu", ("+", tmp1, self.scratch["forest_values_p"], one_const))
+        self.add("load", ("load", level1_left, tmp1))
+        self.add("alu", ("+", tmp1, self.scratch["forest_values_p"], two_const))
+        self.add("load", ("load", level1_right, tmp1))
+        v_level1_left = self.alloc_scratch("v_level1_left", length=VLEN)
+        v_level1_right = self.alloc_scratch("v_level1_right", length=VLEN)
+        self.add("valu", ("vbroadcast", v_level1_left, level1_left))
+        self.add("valu", ("vbroadcast", v_level1_right, level1_right))
 
         # Pause instructions are matched up with yield statements in the reference
         # kernel to let you debug at intermediate steps. The testing harness in this
@@ -598,6 +608,32 @@ class KernelBuilder:
                     # All indices are at root; avoid gather loads.
                     for u in range(UNROLL):
                         body.append(("valu", ("^", v_val[u], v_val[u], v_root_val)))
+                    body.extend(
+                        self.build_hash_vec_multi(
+                            v_val, v_tmp1, v_tmp2, round, i, emit_debug
+                        )
+                    )
+                elif depth == 1:
+                    for u in range(UNROLL):
+                        body.append(("valu", ("&", v_tmp1[u], v_idx[u], v_one)))
+                        body.append(
+                            (
+                                "flow",
+                                (
+                                    "vselect",
+                                    v_node_val[u],
+                                    v_tmp1[u],
+                                    v_level1_left,
+                                    v_level1_right,
+                                ),
+                            )
+                        )
+                        body.append(("valu", ("^", v_val[u], v_val[u], v_node_val[u])))
+                    body.extend(
+                        self.build_hash_vec_multi(
+                            v_val, v_tmp1, v_tmp2, round, i, emit_debug
+                        )
+                    )
                 else:
                     body.extend(
                         self.build_hash_pipeline(
@@ -612,12 +648,7 @@ class KernelBuilder:
                             i,
                             emit_debug,
                             UNROLL,
-                        )
-                    )
-                if depth == 0:
-                    body.extend(
-                        self.build_hash_vec_multi(
-                            v_val, v_tmp1, v_tmp2, round, i, emit_debug
+                            hash_group=3,
                         )
                     )
                 if emit_debug:
@@ -761,6 +792,42 @@ class KernelBuilder:
                 if depth == 0:
                     for u in range(tail_vecs):
                         body.append(("valu", ("^", v_val[u], v_val[u], v_root_val)))
+                    body.extend(
+                        self.build_hash_vec_multi(
+                            v_val[:tail_vecs],
+                            v_tmp1[:tail_vecs],
+                            v_tmp2[:tail_vecs],
+                            round,
+                            tail_base,
+                            emit_debug,
+                        )
+                    )
+                elif depth == 1:
+                    for u in range(tail_vecs):
+                        body.append(("valu", ("&", v_tmp1[u], v_idx[u], v_one)))
+                        body.append(
+                            (
+                                "flow",
+                                (
+                                    "vselect",
+                                    v_node_val[u],
+                                    v_tmp1[u],
+                                    v_level1_left,
+                                    v_level1_right,
+                                ),
+                            )
+                        )
+                        body.append(("valu", ("^", v_val[u], v_val[u], v_node_val[u])))
+                    body.extend(
+                        self.build_hash_vec_multi(
+                            v_val[:tail_vecs],
+                            v_tmp1[:tail_vecs],
+                            v_tmp2[:tail_vecs],
+                            round,
+                            tail_base,
+                            emit_debug,
+                        )
+                    )
                 else:
                     body.extend(
                         self.build_hash_pipeline(
@@ -775,17 +842,7 @@ class KernelBuilder:
                             tail_base,
                             emit_debug,
                             tail_vecs,
-                        )
-                    )
-                if depth == 0:
-                    body.extend(
-                        self.build_hash_vec_multi(
-                            v_val[:tail_vecs],
-                            v_tmp1[:tail_vecs],
-                            v_tmp2[:tail_vecs],
-                            round,
-                            tail_base,
-                            emit_debug,
+                            hash_group=3,
                         )
                     )
                 if emit_debug:
@@ -909,6 +966,22 @@ class KernelBuilder:
                 depth = round % period
                 if depth == 0:
                     body.append(("alu", ("^", tmp_val, tmp_val, root_val)))
+                    body.extend(
+                        self.build_hash(tmp_val, tmp1, tmp2, round, i, emit_debug)
+                    )
+                elif depth == 1:
+                    body.append(("alu", ("&", tmp1, tmp_idx, one_const)))
+                    body.append(
+                        ("flow", ("select", tmp_node_val, tmp1, level1_left, level1_right))
+                    )
+                    if emit_debug:
+                        body.append(
+                            ("debug", ("compare", tmp_node_val, (round, i, "node_val")))
+                        )
+                    body.append(("alu", ("^", tmp_val, tmp_val, tmp_node_val)))
+                    body.extend(
+                        self.build_hash(tmp_val, tmp1, tmp2, round, i, emit_debug)
+                    )
                 else:
                     # node_val = mem[forest_values_p + idx]
                     body.append(
@@ -921,7 +994,9 @@ class KernelBuilder:
                         )
                     # val = myhash(val ^ node_val)
                     body.append(("alu", ("^", tmp_val, tmp_val, tmp_node_val)))
-                body.extend(self.build_hash(tmp_val, tmp1, tmp2, round, i, emit_debug))
+                    body.extend(
+                        self.build_hash(tmp_val, tmp1, tmp2, round, i, emit_debug)
+                    )
                 if emit_debug:
                     body.append(
                         ("debug", ("compare", tmp_val, (round, i, "hashed_val")))
