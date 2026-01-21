@@ -80,6 +80,10 @@ Resumen de optimizaciones aplicadas hasta ahora en `perf_takehome.py` y su motiv
     - Cambio: `batch_size` se divide entre cores; se calcula `core_offset` con `coreid` y se ajustan los punteros `inp_values_p`/`inp_indices_p`.
     - Motivacion: ejecutar en paralelo dos mitades del batch y reducir ciclos casi a la mitad.
 
+20) Escalar cores (N_CORES=4)
+    - Cambio: subir `N_CORES` a 4 manteniendo la particion por core.
+    - Motivacion: aprovechar mas paralelismo para bajar por debajo de 1363 ciclos.
+
 ## Ideas para el futuro
 
 - Software pipelining real: solapar `load_offset` del siguiente vector con el hash actual, con reordenamiento por etapas.
