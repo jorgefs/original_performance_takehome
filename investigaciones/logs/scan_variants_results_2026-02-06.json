@@ -1,0 +1,230 @@
+[
+  {
+    "file": "perf_takehome_1399_candidate.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v10.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v11.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v12.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v13.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v14.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v15.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v15_general.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v2.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v3.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v4.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v5.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v6.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v7.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v8.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1399_candidate_v9.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_backup_before_d3cache.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_pre_cleanup_backup.py",
+    "status": "ok",
+    "cycles": 1399,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1401_candidate.py",
+    "status": "ok",
+    "cycles": 1401,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_candidate.py",
+    "status": "ok",
+    "cycles": 1401,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1403_candidate.py",
+    "status": "ok",
+    "cycles": 1403,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1432_candidate.py",
+    "status": "ok",
+    "cycles": 1432,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1579_candidate.py",
+    "status": "ok",
+    "cycles": 1579,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1612_candidate.py",
+    "status": "ok",
+    "cycles": 1612,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1614.py",
+    "status": "ok",
+    "cycles": 1614,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1615_reconstructed.py",
+    "status": "ok",
+    "cycles": 1634,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_frontier_candidate.py",
+    "status": "ok",
+    "cycles": 1941,
+    "returncode": 0
+  },
+  {
+    "file": "perf_takehome_1657_baseline.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1694.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1708.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1723.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1728.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1739.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1752.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1766.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1782.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_1803.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  },
+  {
+    "file": "perf_takehome_unroll16_wip.py",
+    "status": "fail",
+    "cycles": null,
+    "returncode": 1
+  }
+]

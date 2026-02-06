@@ -1,0 +1,1 @@
+# ASM 1615 vs current kernel (10/16/256)metric | asm_1615 | current------ | -------- | -------load_offset | 2560 | 2048load (scalar) | 7 | 67vload | 32 | 168flow:vselect | 256 | 256# VALU slots per bundle histogramtype | asm_1615 | current---- | -------- | -------hist | 0:5, 1:9, 2:13, 3:6, 4:659, 5:11, 6:912, 7:0 | 0:1219, 1:247, 2:21, 3:35, 4:867, 5:44, 6:551, 7:0

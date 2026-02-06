@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(python tests/submission_tests.py:*)",
+      "Bash(python -c:*)",
+      "Bash(copy C:UsersOEMproyectos_gitotest2original_performance_takehomeperf_takehome.py C:UsersOEMproyectos_gitotest2original_performance_takehomeperf_takehome_1657_with_indices.py)",
+      "Bash(git stash:*)",
+      "Bash(python:*)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}

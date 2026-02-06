@@ -36,6 +36,8 @@ from problem import (
     build_mem_image,
     reference_kernel2,
 )
+
+
 class KernelBuilder:
     def __init__(self):
         self.instrs = []
@@ -225,60 +227,43 @@ class KernelBuilder:
             "debug": 5,
         }
 
-        fast_compile = os.getenv("SCHED_FAST_COMPILE", "0") == "1"
-        weight_mode = os.getenv("SCHED_WEIGHT_MODE", "2").strip().lower()
-        if fast_compile:
-            # Cold-start friendly profile: keep one strong heuristic and
-            # avoid expensive multi-heuristic exploration.
-            weight_sets = [
-                {
-                    "valu": 1,
-                    "load": 2,
-                    "flow": 3,
-                    "store": 3,
-                    "alu": 1,
-                    "debug": 1,
-                },
-            ]
-        else:
-            ws1 = {
+        fast_sched = os.getenv("FAST_SCHED", "0") == "1"
+        quick_sched = os.getenv("QUICK_SCHED", "0") == "1"
+        full_sched = os.getenv("FULL_SCHED", "1") == "1"
+        use_window = os.getenv("SCHED_WINDOW", "0") == "1"
+        use_extra_keys = os.getenv("SCHED_EXTRA_KEYS", "0") == "1"
+        use_random_keys = os.getenv("SCHED_RANDOM_KEYS", "0") == "1"
+        weight_sets = [
+            {
                 "valu": 1,
                 "load": 2,
                 "flow": 3,
                 "store": 3,
                 "alu": 1,
                 "debug": 1,
-            }
-            ws2 = {
-                "valu": 1,
-                "load": 3,
-                "flow": 3,
-                "store": 3,
-                "alu": 1,
-                "debug": 1,
-            }
-            ws3 = {
-                "valu": 1,
-                "load": 2,
-                "flow": 4,
-                "store": 3,
-                "alu": 1,
-                "debug": 1,
-            }
-            if weight_mode == "12":
-                weight_sets = [ws1, ws2]
-            elif weight_mode == "13":
-                weight_sets = [ws1, ws3]
-            elif weight_mode == "23":
-                weight_sets = [ws2, ws3]
-            elif weight_mode == "1":
-                weight_sets = [ws1]
-            elif weight_mode == "2":
-                weight_sets = [ws2]
-            elif weight_mode == "3":
-                weight_sets = [ws3]
-            else:
-                weight_sets = [ws1, ws2, ws3]
+            },
+        ]
+        if full_sched and not quick_sched:
+            weight_sets.extend(
+                [
+                    {
+                        "valu": 1,
+                        "load": 3,
+                        "flow": 3,
+                        "store": 3,
+                        "alu": 1,
+                        "debug": 1,
+                    },
+                    {
+                        "valu": 1,
+                        "load": 2,
+                        "flow": 4,
+                        "store": 3,
+                        "alu": 1,
+                        "debug": 1,
+                    },
+                ]
+            )
 
         def build_crit(engine_weight, reads_list_local=None):
             if reads_list_local is None:
@@ -298,8 +283,6 @@ class KernelBuilder:
             indeg_local = indeg[:]
             ready = {i for i in range(n) if indeg_local[i] == 0}
             remaining = n
-            key_cache = [key_fn(i) for i in range(n)]
-            key_get = key_cache.__getitem__
 
             while remaining:
                 cur: dict[str, list[tuple]] = {}
@@ -323,7 +306,7 @@ class KernelBuilder:
                 progressed = True
                 while progressed:
                     progressed = False
-                    for i in sorted(ready, key=key_get):
+                    for i in sorted(ready, key=key_fn):
                         engine, slot = slots[i]
                         reads = reads_list[i]
                         writes = writes_list[i]
@@ -503,49 +486,49 @@ class KernelBuilder:
             return best_local
 
         best = None
-        search_seeds = int(os.getenv("SCHED_SEARCH", "0" if fast_compile else "0"))
+        if fast_sched:
+            search_seeds = 1
+        elif full_sched and not quick_sched:
+            search_seeds = int(os.getenv("SCHED_SEARCH", "4"))
+        else:
+            search_seeds = min(2, int(os.getenv("SCHED_SEARCH", "4")))
         rng_seeds = list(range(search_seeds))
         for engine_weight in weight_sets:
             crit = build_crit(engine_weight)
-            hash_bias = os.getenv("HASH_BIAS", "1") == "1"
+            hash_bias = os.getenv("HASH_BIAS", "0") == "1"
             if hash_bias:
                 crit = [
                     c + (2 if reads_list[i] and any(isinstance(x, int) for x in reads_list[i]) else 0)
                     for i, c in enumerate(crit)
                 ]
 
-            key_mode = os.getenv("SCHED_KEY_MODE", "full").strip().lower()
-            if fast_compile:
-                keys = [
-                    lambda k, c=crit: (-c[k], -len(succs[k]), k),
-                    lambda k, c=crit: (-c[k], engine_priority[slots[k][0]], -len(succs[k]), k),
-                ]
-            else:
-                if key_mode == "full":
-                    keys = [
-                        lambda k, c=crit: (-c[k], -len(succs[k]), k),
+            keys = [lambda k, c=crit: (-c[k], -len(succs[k]), k)]
+            if not fast_sched:
+                keys.extend(
+                    [
                         lambda k, c=crit: (-c[k], -len(succs[k]), -k),
-                        lambda k, c=crit: (-c[k], engine_priority[slots[k][0]], -len(succs[k]), k),
+                        lambda k, c=crit: (
+                            -c[k],
+                            engine_priority[slots[k][0]],
+                            -len(succs[k]),
+                            k,
+                        ),
+                    ]
+                )
+            if full_sched and not quick_sched and use_extra_keys:
+                keys.extend(
+                    [
                         lambda k, c=crit: (-c[k], -write_sizes[k], -len(succs[k]), k),
                         lambda k, c=crit: (-c[k], write_sizes[k], -len(succs[k]), k),
                         lambda k, c=crit: (-c[k], -read_sizes[k], -len(succs[k]), k),
                         lambda k, c=crit: (-c[k], read_sizes[k], -len(succs[k]), k),
                     ]
-                elif key_mode == "mini":
-                    keys = [
-                        lambda k, c=crit: (-c[k], -len(succs[k]), k),
-                        lambda k, c=crit: (-c[k], engine_priority[slots[k][0]], -len(succs[k]), k),
-                    ]
-                else:  # lean
-                    keys = [
-                        lambda k, c=crit: (-c[k], -len(succs[k]), k),
-                        lambda k, c=crit: (-c[k], engine_priority[slots[k][0]], -len(succs[k]), k),
-                        lambda k, c=crit: (-c[k], -read_sizes[k], -len(succs[k]), k),
-                    ]
-            for seed in rng_seeds:
-                rng = random.Random(seed)
-                pri = [rng.randrange(1_000_000_000) for _ in range(n)]
-                keys.append(lambda k, c=crit, p=pri: (-c[k], p[k]))
+                )
+            if full_sched and not quick_sched and use_random_keys:
+                for seed in rng_seeds:
+                    rng = random.Random(seed)
+                    pri = [rng.randrange(1_000_000_000) for _ in range(n)]
+                    keys.append(lambda k, c=crit, p=pri: (-c[k], p[k]))
 
             for key_fn in keys:
                 instrs_local = schedule_with(crit, key_fn)
@@ -553,22 +536,16 @@ class KernelBuilder:
                 if best is None or cand[0] < best[0]:
                     best = cand
 
-        windows_env = os.getenv("SCHED_WINDOWS", "none").strip()
-        if windows_env.lower() in ("none", "off", "0"):
-            window_sizes = []
-        elif windows_env:
-            try:
-                window_sizes = [int(x.strip()) for x in windows_env.split(",") if x.strip()]
-            except ValueError:
-                window_sizes = [256] if fast_compile else [128, 256, 512, 1024]
-        else:
-            window_sizes = [256] if fast_compile else [128, 256, 512, 1024]
-        for ws in window_sizes:
-            window_sched = schedule_window(slots, ws)
-            if best is None or len(window_sched) < best[0]:
-                best = (len(window_sched), window_sched)
+        if full_sched and not quick_sched and use_window:
+            window_sizes = [128, 256, 512, 1024]
+            for ws in window_sizes:
+                window_sched = schedule_window(slots, ws)
+                if best is None or len(window_sched) < best[0]:
+                    best = (len(window_sched), window_sched)
 
-        rand_iters = int(os.getenv("SCHED_RANDOM_ITERS", "0"))
+        rand_iters = 0 if (fast_sched or quick_sched or not full_sched) else int(
+            os.getenv("SCHED_RANDOM_ITERS", "0")
+        )
         if rand_iters:
             rand_runs = int(os.getenv("SCHED_RANDOM_RUNS", "4"))
             for seed in range(rand_runs):
@@ -951,6 +928,7 @@ class KernelBuilder:
             self.aggressive_schedule = True
             # Fast path specialized for the submission benchmark.
             emit_debug = False
+            # Default to storing indices for correctness; can disable via env for speed.
             store_indices = os.getenv("STORE_INDICES", "1") == "1"
             frontier_k = int(os.getenv("FRONTIER_K", "0"))
             use_frontier = frontier_k in (4, 5)
@@ -998,8 +976,6 @@ class KernelBuilder:
 
             v_one = alloc_vec_const(1, "v_one")
             v_two = alloc_vec_const(2, "v_two")
-            v_four = alloc_vec_const(4, "v_four")
-            v_minus18 = alloc_vec_const(-18, "v_minus18")
             root_val = self.alloc_scratch("root_val")
             add_init("load", ("load", root_val, self.scratch["forest_values_p"]))
             level1_left = self.alloc_scratch("level1_left")
@@ -1075,49 +1051,6 @@ class KernelBuilder:
             v_tmp2 = [
                 self.alloc_scratch(f"v_tmp2_{u}", length=VLEN) for u in range(UNROLL_MAIN)
             ]
-            tmp_banked = os.getenv("TMP_BANKED", "0") == "1"
-            tmp_bank_size = int(os.getenv("TMP_BANK_SIZE", "4"))
-            # Keep this bounded: larger banks can overflow scratch in this kernel.
-            tmp_bank_size = max(1, min(tmp_bank_size, 8, UNROLL_MAIN))
-            tmp_bank_rounds_raw = os.getenv("TMP_BANK_ROUNDS", "").strip()
-            if tmp_bank_rounds_raw:
-                try:
-                    tmp_bank_rounds = {
-                        int(x.strip()) for x in tmp_bank_rounds_raw.split(",") if x.strip()
-                    }
-                except ValueError:
-                    tmp_bank_rounds = set()
-            else:
-                tmp_bank_rounds = None
-            if tmp_banked:
-                v_tmp1_bank = [
-                    self.alloc_scratch(f"v_tmp1_bank_{u}", length=VLEN)
-                    for u in range(tmp_bank_size)
-                ]
-                v_tmp2_bank = [
-                    self.alloc_scratch(f"v_tmp2_bank_{u}", length=VLEN)
-                    for u in range(tmp_bank_size)
-                ]
-            else:
-                v_tmp1_bank = []
-                v_tmp2_bank = []
-            fuse_23_local = os.getenv("FUSE_23_LOCAL", "0") == "1"
-            fuse_23_block = int(os.getenv("FUSE_23_BLOCK", "4"))
-            fuse_100_local = os.getenv("FUSE_100_LOCAL", "0") == "1"
-            if fuse_23_local:
-                # Dedicated temporaries for the fused round-3 hash to avoid aliasing
-                # against round-2 temporaries under aggressive scheduling.
-                v_tmp1_fuse = [
-                    self.alloc_scratch(f"v_tmp1_fuse_{i}", length=VLEN)
-                    for i in range(fuse_23_block)
-                ]
-                v_tmp2_fuse = [
-                    self.alloc_scratch(f"v_tmp2_fuse_{i}", length=VLEN)
-                    for i in range(fuse_23_block)
-                ]
-            else:
-                v_tmp1_fuse = []
-                v_tmp2_fuse = []
             tmp1_pool = int(os.getenv("TMP1_POOL", "4"))
             tmp1_pool_partial = int(os.getenv("TMP1_POOL_PARTIAL", "0"))
             v_tmp1_pool = [
@@ -1150,68 +1083,13 @@ class KernelBuilder:
                 if store_indices
                 else []
             )
-            use_idx_arith = os.getenv("IDX_UPDATE_ARITH", "0") == "1"
-            idx_arith_mode = os.getenv("IDX_ARITH_MODE", "postadd").strip().lower()
-            idx_arith_rounds_raw = os.getenv("IDX_UPDATE_ARITH_ROUNDS", "4,15").strip()
-            early_idx_defer = os.getenv("EARLY_IDX_DEFER", "0") == "1"
-            v_path_b1 = (
-                [self.alloc_scratch(f"v_path_b1_{u}", length=VLEN) for u in range(UNROLL_MAIN)]
-                if early_idx_defer
-                else []
-            )
-            if idx_arith_rounds_raw:
-                try:
-                    idx_arith_rounds = {
-                        int(x.strip())
-                        for x in idx_arith_rounds_raw.split(",")
-                        if x.strip()
-                    }
-                except ValueError:
-                    idx_arith_rounds = set()
-            else:
-                idx_arith_rounds = None
 
-            def emit_idx_update_u(u: int, round_idx: int):
-                if early_idx_defer and round_idx in (1, 12):
-                    # Save path bit only; postpone idx expansion until next round.
-                    body.append(("valu", ("&", v_path_b1[u], v_val[u], v_one)))
-                    return
-                if early_idx_defer and round_idx in (2, 13):
-                    # idx_cur encodes (base+1+b0). Rebuild depth-3 idx directly:
-                    # idx = 4*idx_cur - 18 + 2*b1 + b2
-                    body.append(("valu", ("&", v_tmp1[u], v_val[u], v_one)))  # b2
-                    body.append(
-                        ("valu", ("multiply_add", v_idx[u], v_idx[u], v_four, v_minus18))
-                    )
-                    body.append(
-                        (
-                            "valu",
-                            ("multiply_add", v_idx[u], v_path_b1[u], v_two, v_idx[u]),
-                        )
-                    )
-                    body.append(("valu", ("+", v_idx[u], v_idx[u], v_tmp1[u])))
-                    return
+            use_idx_arith = os.getenv("IDX_UPDATE_ARITH", "0") == "1"
+
+            def emit_idx_update_u(u: int):
                 body.append(("valu", ("&", v_tmp1[u], v_val[u], v_one)))
-                use_arith_now = use_idx_arith
-                if idx_arith_rounds is not None:
-                    use_arith_now = round_idx in idx_arith_rounds
-                if use_arith_now:
-                    if idx_arith_mode == "postadd":
-                        body.append(
-                            (
-                                "valu",
-                                ("multiply_add", v_idx[u], v_idx[u], v_two, v_base_minus1),
-                            )
-                        )
-                        body.append(("valu", ("+", v_idx[u], v_idx[u], v_tmp1[u])))
-                    else:
-                        body.append(("valu", ("+", v_tmp2[u], v_tmp1[u], v_base_minus1)))
-                        body.append(
-                            (
-                                "valu",
-                                ("multiply_add", v_idx[u], v_idx[u], v_two, v_tmp2[u]),
-                            )
-                        )
+                if use_idx_arith:
+                    body.append(("valu", ("+", v_tmp2[u], v_tmp1[u], v_base_minus1)))
                 else:
                     body.append(
                         (
@@ -1225,25 +1103,18 @@ class KernelBuilder:
                             ),
                         )
                     )
-                    body.append(
-                        (
-                            "valu",
-                            ("multiply_add", v_idx[u], v_idx[u], v_two, v_tmp2[u]),
-                        )
+                body.append(
+                    (
+                        "valu",
+                        ("multiply_add", v_idx[u], v_idx[u], v_two, v_tmp2[u]),
                     )
+                )
 
             def emit_hash_only_range(round_idx: int, depth: int, start: int, count: int):
                 v_idx_l = v_idx[start : start + count]
                 v_val_l = v_val[start : start + count]
-                bank_this_round = (round_idx & 1) == 1
-                if tmp_bank_rounds is not None:
-                    bank_this_round = round_idx in tmp_bank_rounds
-                if tmp_banked and bank_this_round:
-                    v_tmp1_l = [v_tmp1_bank[(start + i) % tmp_bank_size] for i in range(count)]
-                    v_tmp2_l = [v_tmp2_bank[(start + i) % tmp_bank_size] for i in range(count)]
-                else:
-                    v_tmp1_l = v_tmp1[start : start + count]
-                    v_tmp2_l = v_tmp2[start : start + count]
+                v_tmp1_l = v_tmp1[start : start + count]
+                v_tmp2_l = v_tmp2[start : start + count]
                 if depth == 0:
                     for u in range(count):
                         body.append(("valu", ("^", v_val_l[u], v_val_l[u], v_root_val)))
@@ -1315,8 +1186,7 @@ class KernelBuilder:
                 elif depth == 2:
                     for u in range(count):
                         body.append(("valu", ("&", v_tmp1_l[u], v_idx_l[u], v_one)))  # b0
-                        if not (early_idx_defer and round_idx in (2, 13)):
-                            body.append(("valu", ("&", v_tmp2_l[u], v_idx_l[u], v_two)))  # b1
+                        body.append(("valu", ("&", v_tmp2_l[u], v_idx_l[u], v_two)))  # b1
                         body.append(
                             (
                                 "flow",
@@ -1347,9 +1217,7 @@ class KernelBuilder:
                                 (
                                     "vselect",
                                     v_tmp1_l[u],
-                                    v_path_b1[start + u]
-                                    if (early_idx_defer and round_idx in (2, 13))
-                                    else v_tmp2_l[u],
+                                    v_tmp2_l[u],
                                     v_tmp4_shared,
                                     v_tmp3_shared,
                                 ),
@@ -1393,9 +1261,24 @@ class KernelBuilder:
                     )
 
             def emit_idx_update(vec_count):
+                use_arith = os.getenv("IDX_UPDATE_ARITH", "0") == "1"
                 for u in range(vec_count):
                     body.append(("valu", ("&", v_tmp1[u], v_val[u], v_one)))
-                    body.append(("valu", ("+", v_tmp2[u], v_tmp1[u], v_base_minus1)))
+                    if use_arith:
+                        body.append(("valu", ("+", v_tmp2[u], v_tmp1[u], v_base_minus1)))
+                    else:
+                        body.append(
+                            (
+                                "flow",
+                                (
+                                    "vselect",
+                                    v_tmp2[u],
+                                    v_tmp1[u],
+                                    v_base_minus1_plus1,
+                                    v_base_minus1,
+                                ),
+                            )
+                        )
                     body.append(
                         (
                             "valu",
@@ -1507,7 +1390,7 @@ class KernelBuilder:
                             emit_hash_only_range(round_idx, depth, start, count)
                             if depth != 0 and depth != forest_height:
                                 for u in range(start, start + count):
-                                    emit_idx_update_u(u, round_idx)
+                                    emit_idx_update_u(u)
                     round_idx = frontier_k
                     depth = round_depths[round_idx]
                     chunk = 1
@@ -1517,66 +1400,61 @@ class KernelBuilder:
                         emit_hash_only_range(round_idx, depth, start, count)
                         if depth != 0 and depth != forest_height:
                             for u in range(start, start + count):
-                                emit_idx_update_u(u, round_idx)
+                                emit_idx_update_u(u)
                     start_round = frontier_k + 1
+                r10_split = os.getenv("R10_SPLIT", "0") == "1"
+                r10_fuse = os.getenv("R10_FUSE_R0", "0") == "1"
                 round_idx = start_round
                 while round_idx < rounds:
                     depth = round_depths[round_idx]
                     chunk = 1
                     starts = starts_for_depth(depth)
-                    if fuse_23_local and round_idx == 2 and (round_idx + 1) < rounds and round_depths[round_idx + 1] == 3:
-                        # Fuse round 2->3 per small block, then skip normal round 3.
-                        for i in range(0, len(starts), fuse_23_block):
-                            block = starts[i : i + fuse_23_block]
+
+                    if (
+                        r10_fuse
+                        and round_idx == 10
+                        and (round_idx + 1) < rounds
+                        and round_depths[round_idx + 1] == 0
+                    ):
+                        next_round = round_idx + 1
+                        for start in starts:
+                            count = min(chunk, vec_count - start)
+                            emit_hash_only_range(round_idx, depth, start, count)
+                            # depth 10 has no idx_update; depth 0 has no idx_update.
+                            emit_hash_only_range(next_round, 0, start, count)
+                        round_idx += 2
+                        continue
+
+                    if (
+                        r10_split
+                        and round_idx == 10
+                        and (round_idx + 1) < rounds
+                        and round_depths[round_idx + 1] == 0
+                    ):
+                        next_round = round_idx + 1
+                        starts_a = [s for s in starts if s < 16]
+                        starts_b = [s for s in starts if s >= 16]
+                        for block in (starts_a, starts_b):
                             for start in block:
                                 count = min(chunk, vec_count - start)
                                 emit_hash_only_range(round_idx, depth, start, count)
-                            for start in block:
-                                count = min(chunk, vec_count - start)
                                 if depth != 0 and depth != forest_height and (
                                     round_idx != rounds - 1 or store_indices
                                 ):
                                     for u in range(start, start + count):
-                                        emit_idx_update_u(u, round_idx)
-                            for bi, start in enumerate(block):
-                                count = min(chunk, vec_count - start)
-                                body.extend(
-                                    self.build_hash_pipeline_addr(
-                                        v_idx[start : start + count],
-                                        v_val[start : start + count],
-                                        [v_tmp1_fuse[bi % fuse_23_block]],
-                                        [v_tmp2_fuse[bi % fuse_23_block]],
-                                        round_idx + 1,
-                                        start * VLEN,
-                                        emit_debug,
-                                        count,
-                                        hash_group=hash_group,
-                                        simple=os.getenv("PIPELINE_SIMPLE", "0") == "1",
-                                    )
-                                )
-                            # Round 3 still needs idx_update before proceeding to round 4.
+                                        emit_idx_update_u(u)
                             for start in block:
                                 count = min(chunk, vec_count - start)
-                                for u in range(start, start + count):
-                                    emit_idx_update_u(u, round_idx + 1)
-                            body.append(("debug", ("comment", "FUSE23_SPLIT")))
+                                emit_hash_only_range(next_round, 0, start, count)
                         round_idx += 2
                         continue
-                    if fuse_100_local and round_idx == 10 and (round_idx + 1) < rounds and round_depths[round_idx + 1] == 0:
-                        # Fuse round 10->11(depth 0): no idx update between them, and
-                        # depth-0 hash only depends on v_val and root constant.
-                        for start in starts:
-                            count = min(chunk, vec_count - start)
-                            emit_hash_only_range(round_idx, depth, start, count)
-                            emit_hash_only_range(round_idx + 1, round_depths[round_idx + 1], start, count)
-                        round_idx += 2
-                        continue
+
                     for start in starts:
                         count = min(chunk, vec_count - start)
                         emit_hash_only_range(round_idx, depth, start, count)
                         if depth != 0 and depth != forest_height and (round_idx != rounds - 1 or store_indices):
                             for u in range(start, start + count):
-                                emit_idx_update_u(u, round_idx)
+                                emit_idx_update_u(u)
                     round_idx += 1
 
                 for u in range(vec_count):
@@ -1598,23 +1476,7 @@ class KernelBuilder:
 
             emit_group(UNROLL_MAIN, zero_const, base_is_zero=True)
 
-            if fuse_23_local:
-                segments = []
-                current = []
-                for eng, slot in body:
-                    if eng == "debug" and slot == ("comment", "FUSE23_SPLIT"):
-                        if current:
-                            segments.append(current)
-                        current = []
-                        continue
-                    current.append((eng, slot))
-                if current:
-                    segments.append(current)
-                body_instrs = []
-                for seg in segments:
-                    body_instrs.extend(self.build(seg, vliw=True))
-            else:
-                body_instrs = self.build(body, vliw=True)
+            body_instrs = self.build(body, vliw=True)
 
             def _writes_src(bundle, src_base: int) -> bool:
                 src_lo = src_base
@@ -1693,6 +1555,11 @@ class KernelBuilder:
         zero_const = self.scratch_const(0)
         one_const = self.scratch_const(1)
         two_const = self.scratch_const(2)
+        three_const = self.scratch_const(3)
+        four_const = self.scratch_const(4)
+        five_const = self.scratch_const(5)
+        six_const = self.scratch_const(6)
+        seven_const = self.scratch_const(7)
 
         self.add("flow", ("pause",))
         self.add("debug", ("comment", "Starting loop"))
@@ -1702,6 +1569,16 @@ class KernelBuilder:
         tmp_val = self.alloc_scratch("tmp_val")
         tmp_node_val = self.alloc_scratch("tmp_node_val")
         tmp_addr = self.alloc_scratch("tmp_addr")
+        tmp_cached_node = self.alloc_scratch("tmp_cached_node")
+
+        # Generalized (non-optimized) idea: cache the first 7 nodes (depth 0-2).
+        cache_nodes = []
+        for i in range(7):
+            idx_const = self.scratch_const(i)
+            cache = self.alloc_scratch(f"cache_node_{i}")
+            self.add("alu", ("+", tmp_addr, self.scratch["forest_values_p"], idx_const))
+            self.add("load", ("load", cache, tmp_addr))
+            cache_nodes.append(cache)
 
         for round in range(rounds):
             for i in range(batch_size):
@@ -1712,8 +1589,24 @@ class KernelBuilder:
                 body.append(("alu", ("+", tmp_addr, self.scratch["inp_values_p"], i_const)))
                 body.append(("load", ("load", tmp_val, tmp_addr)))
                 body.append(("debug", ("compare", tmp_val, (round, i, "val"))))
+                body.append(("alu", ("+", tmp_cached_node, cache_nodes[0], zero_const)))
+                body.append(("alu", ("==", tmp1, tmp_idx, one_const)))
+                body.append(("flow", ("select", tmp_cached_node, tmp1, cache_nodes[1], tmp_cached_node)))
+                body.append(("alu", ("==", tmp1, tmp_idx, two_const)))
+                body.append(("flow", ("select", tmp_cached_node, tmp1, cache_nodes[2], tmp_cached_node)))
+                body.append(("alu", ("==", tmp1, tmp_idx, three_const)))
+                body.append(("flow", ("select", tmp_cached_node, tmp1, cache_nodes[3], tmp_cached_node)))
+                body.append(("alu", ("==", tmp1, tmp_idx, four_const)))
+                body.append(("flow", ("select", tmp_cached_node, tmp1, cache_nodes[4], tmp_cached_node)))
+                body.append(("alu", ("==", tmp1, tmp_idx, five_const)))
+                body.append(("flow", ("select", tmp_cached_node, tmp1, cache_nodes[5], tmp_cached_node)))
+                body.append(("alu", ("==", tmp1, tmp_idx, six_const)))
+                body.append(("flow", ("select", tmp_cached_node, tmp1, cache_nodes[6], tmp_cached_node)))
+
                 body.append(("alu", ("+", tmp_addr, self.scratch["forest_values_p"], tmp_idx)))
                 body.append(("load", ("load", tmp_node_val, tmp_addr)))
+                body.append(("alu", ("<", tmp1, tmp_idx, seven_const)))
+                body.append(("flow", ("select", tmp_node_val, tmp1, tmp_cached_node, tmp_node_val)))
                 body.append(("debug", ("compare", tmp_node_val, (round, i, "node_val"))))
                 body.append(("alu", ("^", tmp_val, tmp_val, tmp_node_val)))
                 body.extend(self.build_hash(tmp_val, tmp1, tmp2, round, i))
@@ -1737,41 +1630,6 @@ class KernelBuilder:
         self.instrs.append({"flow": [("pause",)]})
 
 BASELINE = 147734
-_KERNEL_BUILD_CACHE = {}
-
-
-def _kernel_build_key(forest_height: int, rounds: int, batch_size: int):
-    # Build is fully determined by params + tuning env vars.
-    env_keys = (
-        "SCHED_FAST_COMPILE",
-        "SCHED_WEIGHT_MODE",
-        "SCHED_SEARCH",
-        "HASH_BIAS",
-        "SCHED_RANDOM_ITERS",
-        "SCHED_RANDOM_RUNS",
-        "SCHED_WINDOWS",
-        "SCHED_KEY_MODE",
-        "FRONTIER_K",
-        "ORDER_VARIANT",
-        "HASH_GROUP",
-        "TMP_BANKED",
-        "TMP_BANK_SIZE",
-        "FUSE_23_LOCAL",
-        "FUSE_23_BLOCK",
-        "FUSE_100_LOCAL",
-        "TMP1_POOL",
-        "TMP1_POOL_PARTIAL",
-        "STAGE_RENAME",
-        "STAGE_RENAME_U",
-        "PIPELINE_SIMPLE",
-        "IDX_UPDATE_ARITH",
-        "IDX_ARITH_MODE",
-        "IDX_UPDATE_ARITH_ROUNDS",
-        "TMP_BANK_ROUNDS",
-    )
-    env_sig = tuple((k, os.getenv(k, "")) for k in env_keys)
-    return (forest_height, rounds, batch_size, env_sig)
-
 
 def do_kernel_test(
     forest_height: int,
@@ -1787,69 +1645,36 @@ def do_kernel_test(
     inp = Input.generate(forest, batch_size, rounds)
     mem = build_mem_image(forest, inp)
 
-    cache_key = _kernel_build_key(forest.height, rounds, len(inp.indices))
-    cached = _KERNEL_BUILD_CACHE.get(cache_key)
-    if cached is None:
-        kb = KernelBuilder()
-        kb.build_kernel(forest.height, len(forest.values), len(inp.indices), rounds)
-        cached = (kb.instrs, kb.debug_info())
-        _KERNEL_BUILD_CACHE[cache_key] = cached
-    instrs, dbg_info = cached
+    kb = KernelBuilder()
+    kb.build_kernel(forest.height, len(forest.values), len(inp.indices), rounds)
+    # print(kb.instrs)
 
     value_trace = {}
     machine = Machine(
         mem,
-        instrs,
-        dbg_info,
+        kb.instrs,
+        kb.debug_info(),
         n_cores=N_CORES,
         value_trace=value_trace,
         trace=trace,
     )
     machine.prints = prints
-    mismatch_trace = os.getenv("MISMATCH_TRACE", "0") == "1"
-    check_indices = os.getenv("CHECK_INDICES", "0") == "1"
-
-    def _first_mismatch(got, exp):
-        for j, (a, b) in enumerate(zip(got, exp)):
-            if a != b:
-                return j, a, b
-        return None
-
     for i, ref_mem in enumerate(reference_kernel2(mem, value_trace)):
         machine.run()
         inp_values_p = ref_mem[6]
-        got_vals = machine.mem[inp_values_p : inp_values_p + len(inp.values)]
-        exp_vals = ref_mem[inp_values_p : inp_values_p + len(inp.values)]
         if prints:
-            print(got_vals)
-            print(exp_vals)
-        if mismatch_trace and got_vals != exp_vals:
-            mm = _first_mismatch(got_vals, exp_vals)
-            if mm is not None:
-                j, a, b = mm
-                lane = j % VLEN
-                vec = j // VLEN
-                print(
-                    f"MISMATCH value round={i} elem={j} vec={vec} lane={lane} got={a} exp={b}"
-                )
-        assert got_vals == exp_vals, f"Incorrect result on round {i}"
+            print(machine.mem[inp_values_p : inp_values_p + len(inp.values)])
+            print(ref_mem[inp_values_p : inp_values_p + len(inp.values)])
+        assert (
+            machine.mem[inp_values_p : inp_values_p + len(inp.values)]
+            == ref_mem[inp_values_p : inp_values_p + len(inp.values)]
+        ), f"Incorrect result on round {i}"
         inp_indices_p = ref_mem[5]
-        got_idx = machine.mem[inp_indices_p : inp_indices_p + len(inp.indices)]
-        exp_idx = ref_mem[inp_indices_p : inp_indices_p + len(inp.indices)]
         if prints:
-            print(got_idx)
-            print(exp_idx)
-        if mismatch_trace and check_indices and got_idx != exp_idx:
-            mm = _first_mismatch(got_idx, exp_idx)
-            if mm is not None:
-                j, a, b = mm
-                lane = j % VLEN
-                vec = j // VLEN
-                print(
-                    f"MISMATCH index round={i} elem={j} vec={vec} lane={lane} got={a} exp={b}"
-                )
-        if check_indices:
-            assert got_idx == exp_idx, f"Incorrect indices on round {i}"
+            print(machine.mem[inp_indices_p : inp_indices_p + len(inp.indices)])
+            print(ref_mem[inp_indices_p : inp_indices_p + len(inp.indices)])
+        # Updating these in memory isn't required, but you can enable this check for debugging
+        # assert machine.mem[inp_indices_p:inp_indices_p+len(inp.indices)] == ref_mem[inp_indices_p:inp_indices_p+len(inp.indices)]
 
     print("CYCLES: ", machine.cycle)
     print("Speedup over baseline: ", BASELINE / machine.cycle)
